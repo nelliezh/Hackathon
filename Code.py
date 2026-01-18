@@ -6,6 +6,7 @@ from mediapipe.tasks.python import vision
 import numpy as np
 from pathlib import Path
 import random
+import requests
 
 base_options = python.BaseOptions(model_asset_path="detector.tflite")
 options = vision.FaceDetectorOptions(base_options=base_options)
@@ -31,6 +32,17 @@ def load_known_faces(known_dir: str = "known") -> dict:
             continue
         encoding_map[name] = (image, detection_result)
     return encoding_map
+
+
+def load_image_from_pi(output_path: str = "image.png") -> None:
+    """Capture a single frame from the first webcam and save it."""
+    response = requests.get("http://127.0.0.1:5000/picture")
+    response.raise_for_status()
+
+    with open(output_path, "wb") as f:
+        f.write(response.content)
+
+    print(f"🖼️ Saved image from Pi to {output_path}")
 
 
 def load_image_from_webcam(output_path: str = "image.png") -> None:
@@ -108,7 +120,8 @@ if __name__ == "__main__":
     known_encodings = load_known_faces("faces")
     if not known_encodings:
         raise RuntimeError("No known faces loaded – add images to the `known/` folder.")
-    load_image_from_webcam()
+    # load_image_from_webcam()
+    load_image_from_pi()
     results = encode_faces("image.png", known_encodings)
     if results:
         draw_results("image.png", results, "output.jpg")
