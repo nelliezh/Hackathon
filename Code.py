@@ -8,6 +8,7 @@ from pathlib import Path
 import random
 import requests
 
+
 base_options = python.BaseOptions(model_asset_path="detector.tflite")
 options = vision.FaceDetectorOptions(base_options=base_options)
 detector = vision.FaceDetector.create_from_options(options)
@@ -30,6 +31,8 @@ def load_known_faces(known_dir: str = "known") -> dict:
         if not detection_result:
             print(f"⚠️ No face found in {known_file.name}; skipping.")
             continue
+        # FIXME Just for the new one
+        image = cv2.imread(str(known_file), cv2.IMREAD_COLOR)
         encoding_map[name] = (image, detection_result)
     return encoding_map
 
@@ -75,6 +78,8 @@ def encode_faces(image_path: str, known_encodings: dict) -> list:
         name = random.choice(list(known_encodings.keys()))
         meme_image, meme_face_detection = known_encodings[name]
 
+        # FIXME Just for the new one
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
         results.append((meme_image, meme_face_detection, image, face_location))
     return results
 
@@ -115,6 +120,95 @@ def draw_results(image_path: str, results: list, output_path: str = "annotated.j
         cv2.imwrite(output_path, meme_cv)
         print(f"🖼️ Face-swapped image saved to {output_path}")
 
+        import cv2
+
+
+import numpy as np
+import sys
+
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+
+
+def create_face_landmarker():
+    base_options = python.BaseOptions(model_asset_path="face_landmarker.task")
+
+    options = vision.FaceLandmarkerOptions(
+        base_options=base_options,
+        num_faces=1,
+        output_face_blendshapes=False,
+        output_facial_transformation_matrixes=False,
+    )
+
+    return vision.FaceLandmarker.create_from_options(options)
+
+
+def get_landmarks(image, landmarker):
+    """Return Nx2 array of face landmarks."""
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+
+    result = landmarker.detect(mp_image)
+    if not result.face_landmarks:
+        return None
+
+    h, w, _ = image.shape
+    landmarks = []
+    for lm in result.face_landmarks[0]:
+        landmarks.append((int(lm.x * w), int(lm.y * h)))
+
+    return np.array(landmarks)
+
+
+def create_face_mask(image, landmarks):
+    mask = np.zeros(image.shape[:2], dtype=np.uint8)
+    hull = cv2.convexHull(landmarks)
+    cv2.fillConvexPoly(mask, hull, 255)
+    return mask
+
+
+def warp_face(src_img, src_landmarks, dst_landmarks, dst_shape):
+    src_pts = np.float32(src_landmarks)
+    dst_pts = np.float32(dst_landmarks)
+
+    M, _ = cv2.estimateAffinePartial2D(src_pts, dst_pts)
+    if M is None:
+        raise RuntimeError("Could not estimate affine transform")
+
+    warped = cv2.warpAffine(
+        src_img,
+        M,
+        (dst_shape[1], dst_shape[0]),
+        flags=cv2.INTER_LINEAR,
+        borderMode=cv2.BORDER_REFLECT,
+    )
+    return warped
+
+
+def draw_results2(image_path: str, results: list, output_path: str = "annotated.jpg"):
+    landmarker = create_face_landmarker()
+    for meme_image, meme_face_detection, webcam_image, face_detection in results:
+        print("src_img:", type(webcam_image), webcam_image is None)
+        print("dst_img:", type(meme_image), meme_image is None)
+
+        src_landmarks = get_landmarks(webcam_image, landmarker)
+        dst_landmarks = get_landmarks(meme_image, landmarker)
+
+        dst_face_mask = create_face_mask(meme_image, dst_landmarks)
+        warped_src_face = warp_face(
+            webcam_image, src_landmarks, dst_landmarks, meme_image.shape
+        )
+        center = np.mean(dst_landmarks, axis=0).astype(int)
+        center = (int(center[0]), int(center[1]))
+
+        output = cv2.seamlessClone(
+            warped_src_face, meme_image, dst_face_mask, center, cv2.NORMAL_CLONE
+        )
+
+        cv2.imwrite(output_path, output)
+        print(f"🖼️ Face-swapped image saved to {output_path}")
+
 
 if __name__ == "__main__":
     known_encodings = load_known_faces("faces")
@@ -124,6 +218,6 @@ if __name__ == "__main__":
     load_image_from_pi()
     results = encode_faces("image.png", known_encodings)
     if results:
-        draw_results("image.png", results, "output.jpg")
+        draw_results2("image.png", results, "output.jpg")
     else:
         print("❌ No recognizable face found.")
