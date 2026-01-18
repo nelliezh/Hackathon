@@ -4,9 +4,7 @@ app = Flask(__name__)
 def hello_world():
     return "<p>Hello, World!</p>"
 from flask import Flask, render_template, request
-
 app = Flask(__name__)
-
 @app.route("/", methods=["GET", "POST"])
 def index():
     message = ""
@@ -19,10 +17,8 @@ def index():
         elif "btn_custom" in request.form:
             message = "Custom action executed!"
     return render_template("index.html", message=message)
-
 @app.route("/picture")
 def capture():
     pass
-
 if __name__ == "__main__":
     app.run(debug=True)
